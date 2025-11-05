@@ -1,0 +1,119 @@
+<!DOCTYPE html>
+<html lang="ja">
+<head>
+  <meta charset="utf-8" />
+  <meta name="viewport" content="width=device-width, initial-scale=1" />
+  <title>受信＆3D表示（デバッグ版）</title>
+
+  <!-- p5.js（安定版） -->
+  <script src="https://cdnjs.cloudflare.com/ajax/libs/p5.js/1.11.1/p5.min.js"></script>
+  <!-- socket.io は同一オリジンから（CDNを使わない） -->
+  <script src="/socket.io/socket.io.js"></script>
+  <style>
+    body { margin:0; background:#000; color:#0f0; font-family:ui-monospace,Menlo,monospace; }
+    #ui { position:fixed; left:8px; top:8px; background:rgba(0,0,0,.55); padding:6px 8px; border-radius:6px; }
+    button { font-size:14px; padding:6px 10px; }
+  </style>
+</head>
+<body>
+  <div id="ui">
+    <div>あなたのID: <span id="myid"></span></div>
+    <button id="join">ルームに入る</button>
+    <div>受信 b,g：<span id="vals">- , -</span></div>
+    <div>ヒント: 球は最初 原点(中央・z=0) に出ます</div>
+  </div>
+
+  <script>
+    // --- 通信まわり ---
+    const socket = io();             // ← 重要：同一オリジンへ接続
+    let b = 0, g = 0;                // スマホから来る角度（度）
+    let x = 0, y = 0, r = 40;
+    const speed = 0.1;
+
+    // クライアントID
+    let myid = sessionStorage.getItem('clientId');
+    if (!myid) { myid = Math.random().toString(36).slice(2); sessionStorage.setItem('clientId', myid); }
+    document.querySelector('#myid').textContent = myid;
+
+    document.querySelector('#join').onclick = () => {
+      socket.emit('join', 'game');
+      document.querySelector('#join').disabled = true;
+    };
+
+    // スマホからのデータ受信
+    socket.on('sensor', (data) => {
+      // data = { b:..., g:... }
+      b = Number(data.b) || 0;
+      g = Number(data.g) || 0;
+      document.querySelector('#vals').textContent =
+        `${b.toFixed(1)}, ${g.toFixed(1)}`;
+      // console.log('sensor', data); // 必要ならログ
+    });
+
+    // --- p5.js 描画 ---
+    let limit = 350;
+    function setup() {
+      createCanvas(800, 800, WEBGL);
+      // 斜めから原点を見る（デバッグしやすい）
+      camera(400, 400, 400, 0, 0, 0, 0, 1, 0);
+      noStroke();
+    }
+
+    function drawAxes(){
+      push();
+      strokeWeight(2);
+      stroke(255,0,0); line(0,0,0, 200,0,0);   // X
+      stroke(0,255,0); line(0,0,0, 0,200,0);   // Y
+      stroke(0,128,255); line(0,0,0, 0,0,200); // Z
+      pop();
+    }
+    function drawFloor(){
+      push();
+      noStroke();
+      translate(0,0,-60);
+      rotateX(PI/2);
+      normalMaterial();
+      plane(1000,1000);
+      pop();
+    }
+
+    function draw() {
+      background(0);
+      orbitControl();
+
+      // デバッグの目印
+      drawAxes();
+      drawFloor();
+
+      // 板（スマホの傾きで回転）
+      push();
+      rotateX((-PI * b) / 180);
+      rotateY((PI * g) / 180);
+      translate(0, 0, -50);
+      normalMaterial();       // 必ず見える材質
+      box(800, 800, 30);
+      pop();
+
+      // 球の位置更新
+      x += speed * g;         // 左右
+      y += speed * b;         // 前後
+      x = constrain(x, -limit, limit);
+      y = constrain(y, -limit, limit);
+
+      // まずは高さ z=0 で“必ず見える”ことを確認
+      const z = 0;
+      // 傾きに合わせる場合は次に切り替え：
+      // const z = -x * sin((PI * g) / 180) - y * sin((PI * b) / 180);
+
+      // 球
+      push();
+      noStroke();
+      normalMaterial();       // まずは確実に見える材質
+      translate(x, y, z);
+      sphere(r);
+      pop();
+    }
+  </script>
+</body>
+</html>
+

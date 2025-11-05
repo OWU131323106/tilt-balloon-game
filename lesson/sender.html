@@ -1,0 +1,26 @@
+<!DOCTYPE html>
+<html lang="ja">
+<head>
+  <meta charset="UTF-8">
+  <title>スマホセンサー送信</title>
+  <script src="https://cdnjs.cloudflare.com/ajax/libs/socket.io/4.1.3/socket.io.js"></script>
+</head>
+<body>
+  <h1>スマホセンサー送信</h1>
+  <p>傾けてデータを送信します。</p>
+
+  <script>
+    const socket = io();
+    socket.emit("join", "game");
+
+    window.addEventListener("deviceorientation", (event) => {
+      const data = {
+        g: event.gamma, // 左右傾き
+        b: event.beta   // 前後傾き
+      };
+      socket.emit("sensor", data);
+      console.log(data);
+    });
+  </script>
+</body>
+</html>

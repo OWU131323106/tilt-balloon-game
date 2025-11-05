@@ -1,0 +1,67 @@
+<!doctype html>
+<html lang="ja">
+<head>
+  <meta charset="UTF-8" />
+  <meta name="viewport" content="width=device-width, initial-scale=1" />
+  <title>スマホセンサー送信</title>
+  <!-- サーバ提供のクライアントを利用（同一オリジン） -->
+  <script src="/socket.io/socket.io.js"></script>
+  <style>
+    body { font-family: system-ui, -apple-system, sans-serif; padding: 16px; }
+    button { font-size: 16px; padding: 10px 16px; }
+    .ok { color: #0a0; } .ng { color: #a00; }
+  </style>
+</head>
+<body>
+  <h1>スマホセンサー送信</h1>
+  <p>下のボタンでルームに入って、センサー送信を開始してください。</p>
+
+  <div>あなたのID: <span id="myid"></span></div>
+  <p id="status" class="ng">未接続</p>
+
+  <button id="join">ルームに入る</button>
+  <button id="start">センサ送信開始</button>
+
+  <script>
+    const socket = io(); // 同一オリジンに自動接続
+    const statusEl = document.getElementById('status');
+    const myid = sessionStorage.getItem('clientId') || (function(){ 
+      const id = Math.random().toString(36).slice(2); 
+      sessionStorage.setItem('clientId', id);
+      return id;
+    })();
+    document.getElementById('myid').textContent = myid;
+
+    document.getElementById('join').onclick = () => {
+      socket.emit('join', 'game');
+      statusEl.textContent = 'ルーム: game に参加しました';
+      statusEl.className = 'ok';
+    };
+
+    document.getElementById('start').onclick = async () => {
+      // iOS 13+ は明示的な許可が必要
+      if (window.DeviceOrientationEvent && typeof DeviceOrientationEvent.requestPermission === 'function') {
+        const perm = await DeviceOrientationEvent.requestPermission().catch(()=> 'denied');
+        if (perm !== 'granted') {
+          alert('センサーの許可が必要です（設定 > Safari > モーションと画面の向きを許可）');
+          return;
+        }
+      }
+      window.addEventListener('deviceorientation', (event) => {
+        const data = {
+          id: myid,
+          g: event.gamma ?? 0, // 左右傾き
+          b: event.beta  ?? 0  // 前後傾き
+        };
+        socket.emit('sensor', data);
+        // console.log('send', data);
+      });
+      statusEl.textContent = 'センサー送信中…';
+      statusEl.className = 'ok';
+    };
+
+    socket.on('connect', ()=> { console.log('socket connected'); });
+    socket.on('disconnect', ()=> { statusEl.textContent = '切断されました'; statusEl.className = 'ng'; });
+  </script>
+</body>
+</html>

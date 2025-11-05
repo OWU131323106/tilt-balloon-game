@@ -1,0 +1,212 @@
+<!DOCTYPE html>
+<html lang="ja">
+<head>
+  <meta charset="utf-8" />
+  <title>ふわふわバルーン</title>
+  <meta name="viewport" content="width=device-width, initial-scale=1" />
+  <style>body{margin:0;background:#111;color:#fff;font-family:sans-serif}</style>
+  <script src="https://cdnjs.cloudflare.com/ajax/libs/p5.js/1.1.9/p5.min.js"></script>
+  <script src="https://cdnjs.cloudflare.com/ajax/libs/socket.io/4.1.3/socket.io.js"></script>
+</head>
+<body>
+  <div style="position:fixed;z-index:9;padding:8px">
+    <button id="connect">ルームに入る</button>
+    <span style="margin-left:8px">あなたのID: <span id="myid"></span></span>
+  </div>
+  <script>
+    // ====== Socket.io 受信部 ======
+    const socket = io();
+    const room = "game";
+    const btn = document.getElementById('connect');
+
+    let myid = sessionStorage.getItem('clientId');
+    if (!myid) {
+      myid = Math.random().toString(36).substring(2, 8);
+      sessionStorage.setItem('clientId', myid);
+    }
+    document.getElementById('myid').textContent = myid;
+
+    let b = 0, g = 0; // beta/gamma
+    btn.addEventListener('click', ()=>{
+      socket.emit("join", room);
+      btn.remove();
+    });
+    socket.on("sensor", (data) => {
+      // 単一端末想定：とりあえず最後に届いた値で操作
+      // 複数にするなら data.id ごとに管理して"自分のidだけ使う"などに発展可
+      g = parseFloat(data.g);
+      b = parseFloat(data.b);
+    });
+
+    // ====== p5.js ゲーム部（2D） ======
+    let W=800, H=1000;
+    let balloon = {x: 400, y: 700, r: 24};
+    let obstacles = [];
+    let spawnInterval = 900; // ms
+    let lastSpawn = 0;
+    let scrollSpeed = 2;     // 上向きスクロール（障害物が上へ移動）
+    let sensitivity = 0.25;  // 傾き->速度 係数
+    let startedAt = 0;
+    let limitMs = 30_000;    // 制限時間 30秒
+    let gameOver = false;
+    let cleared = false;
+
+    function setup(){
+      const c = createCanvas(W, H);
+      c.parent(document.body);
+      resetGame();
+    }
+
+    function resetGame(){
+      balloon.x = W/2;
+      balloon.y = H*0.7;
+      obstacles = [];
+      lastSpawn = 0;
+      scrollSpeed = 2;
+      gameOver = false;
+      cleared = false;
+      startedAt = millis();
+      loop();
+    }
+
+    function draw(){
+      // 背景（空グラデ）
+      setSky();
+
+      if (gameOver || cleared) {
+        drawUI();
+        noLoop();
+        return;
+      }
+
+      // 難易度：時間で少しずつスクロール加速
+      const t = millis() - startedAt;
+      scrollSpeed = 2 + min(6, t/6000); // 最大8程度
+
+      // バルーン制御：左右はgammaを係数化、上下はふわっと上昇演出
+      balloon.x += g * sensitivity;
+      balloon.y -= 0.5; // ゆっくり上昇
+      clampBalloon();
+
+      // 障害物生成（穴あきの壁：左右から伸びる棒）
+      if (millis() - lastSpawn > spawnInterval) {
+        spawnWall();
+        lastSpawn = millis();
+      }
+
+      // 障害物更新/描画＆当たり判定
+      for (let i=obstacles.length-1; i>=0; i--){
+        const o = obstacles[i];
+        o.y -= scrollSpeed; // 上へ移動
+        drawObstacle(o);
+        if (circleRectCollide(balloon.x, balloon.y, balloon.r, o.x, o.y, o.w, o.h)) {
+          gameOver = true;
+        }
+        if (o.y + o.h < 0) obstacles.splice(i,1);
+      }
+
+      // バルーン描画
+      drawBalloon();
+
+      // UI：残り時間
+      drawHUD();
+
+      // クリア判定
+      if (t >= limitMs) {
+        cleared = true;
+      }
+    }
+
+    function setSky(){
+      // 簡易グラデーション
+      for (let y=0; y<H; y++){
+        const c = lerpColor(color(10,15,40), color(30,120,200), y/H);
+        stroke(c); line(0,y,W,y);
+      }
+      noStroke();
+      fill(255,255,255,28);
+      ellipse(120,120,160,160); // ほわっとした光
+    }
+
+    function clampBalloon(){
+      if (balloon.x < balloon.r) balloon.x = balloon.r;
+      if (balloon.x > W - balloon.r) balloon.x = W - balloon.r;
+      if (balloon.y < balloon.r) balloon.y = balloon.r;
+      if (balloon.y > H - balloon.r) balloon.y = H - balloon.r;
+    }
+
+    function drawBalloon(){
+      // 影
+      fill(0,0,0,30); ellipse(balloon.x+6, balloon.y+10, balloon.r*2.1, balloon.r*1.2);
+      // 本体
+      fill(255); stroke(240); strokeWeight(2);
+      ellipse(balloon.x, balloon.y, balloon.r*2, balloon.r*2);
+      noStroke();
+      // 紐
+      stroke(240); strokeWeight(2);
+      line(balloon.x, balloon.y+balloon.r, balloon.x, balloon.y+balloon.r+22);
+      noStroke();
+    }
+
+    function spawnWall(){
+      // 画面下から出現し、上へ流れる。中央に通り抜け穴を空ける
+      const holeW = random(140, 220);
+      const holeX = random(120, W-120 - holeW);
+      const thickness = 28;
+      const y = -thickness + H; // 画面下端
+      // 左ブロック
+      obstacles.push({x:0, y, w:holeX, h:thickness});
+      // 右ブロック
+      obstacles.push({x:holeX + holeW, y, w:W - (holeX + holeW), h:thickness});
+    }
+
+    function drawObstacle(o){
+      fill(250, 250, 255, 180);
+      rect(o.x, o.y, o.w, o.h, 8);
+    }
+
+    function drawHUD(){
+      const elapsed = millis() - startedAt;
+      const rest = max(0, limitMs - elapsed);
+      const sec = (rest/1000).toFixed(1);
+      noStroke(); fill(255);
+      textSize(20);
+      text(`TIME ${sec}s`, 20, 40);
+      text(`SCORE ${(elapsed/1000).toFixed(1)}`, 20, 64);
+      text(`TILT γ=${g.toFixed(1)}`, 20, 88);
+    }
+
+    function drawUI(){
+      const elapsed = millis() - startedAt;
+      textAlign(CENTER, CENTER);
+      textSize(36);
+      fill(255);
+      if (gameOver) {
+        text("GAME OVER", W/2, H/2 - 30);
+      } else if (cleared) {
+        text("CLEARED!", W/2, H/2 - 30);
+      }
+      textSize(22);
+      text(`SCORE: ${(elapsed/1000).toFixed(1)} sec`, W/2, H/2 + 10);
+      textSize(16);
+      text("Press [R] to Restart", W/2, H/2 + 44);
+      textAlign(LEFT, BASELINE);
+    }
+
+    function keyPressed(){
+      if (key === 'r' || key === 'R') {
+        resetGame();
+      }
+    }
+
+    // 円と矩形の簡易衝突
+    function circleRectCollide(cx, cy, cr, rx, ry, rw, rh){
+      const closestX = constrain(cx, rx, rx+rw);
+      const closestY = constrain(cy, ry, ry+rh);
+      const dx = cx - closestX;
+      const dy = cy - closestY;
+      return (dx*dx + dy*dy) <= cr*cr;
+    }
+  </script>
+</body>
+</html>

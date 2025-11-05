@@ -1,0 +1,71 @@
+<!DOCTYPE html>
+<html lang="ja">
+<head>
+  <meta charset="utf-8" />
+  <title>Smart Controller</title>
+  <meta name="viewport" content="width=device-width, initial-scale=1" />
+  <style>body{font-family:sans-serif;padding:16px}</style>
+  <script src="https://cdnjs.cloudflare.com/ajax/libs/socket.io/4.1.3/socket.io.js"></script>
+</head>
+<body>
+  <h1>スマホ傾きコントローラ</h1>
+  <p>下のボタンを押してセンサーを有効化 → ルーム参加</p>
+  <button id="perm">センサーを有効にします（iOS）</button>
+  <button id="join">ルームに入る</button>
+  <div>あなたのID: <span id="myid"></span></div>
+
+  <script>
+    const socket = io();
+    const room = "game";
+    const btnPerm = document.getElementById("perm");
+    const btnJoin = document.getElementById("join");
+
+    // 匿名ID（ブラウザタブごと）
+    let myid = sessionStorage.getItem('clientId');
+    if (!myid) {
+      myid = Math.random().toString(36).substring(2, 8);
+      sessionStorage.setItem('clientId', myid);
+    }
+    document.getElementById('myid').textContent = myid;
+
+    // iOS13+の権限取得
+    btnPerm.addEventListener('click', async () => {
+      try {
+        if (window.DeviceMotionEvent?.requestPermission) {
+          await DeviceMotionEvent.requestPermission();
+        }
+        if (window.DeviceOrientationEvent?.requestPermission) {
+          await DeviceOrientationEvent.requestPermission();
+        }
+        alert("センサーが有効になりました");
+      } catch(e) {
+        alert("権限を付与できませんでした: " + e);
+      }
+    });
+
+    // ルーム参加
+    btnJoin.addEventListener('click', () => {
+      socket.emit("join", room);
+      btnJoin.disabled = true;
+      btnJoin.textContent = "参加済み";
+    });
+
+    // 傾き送信（throttle ~20Hz）
+    let lastSent = 0;
+    let latest = {b:0, g:0};
+    window.addEventListener('deviceorientation', (ev) => {
+      latest.b = ev.beta  ?? 0; // 上下（-180..180）
+      latest.g = ev.gamma ?? 0; // 左右（-90..90）
+    });
+
+    function tick(ts){
+      if (ts - lastSent > 50) { // 約20Hz
+        socket.emit('sensor', { id: myid, room, b: latest.b, g: latest.g });
+        lastSent = ts;
+      }
+      requestAnimationFrame(tick);
+    }
+    requestAnimationFrame(tick);
+  </script>
+</body>
+</html>
